@@ -1,0 +1,8 @@
+version: 1.2
+workflows:
+  - subclass: WDL
+    primaryDescriptorPath: /WES_MuTect2_pipeline.wdl
+
+    authors:
+      - name: Garrett Lam
+        email: glam@broadinstitute.org
