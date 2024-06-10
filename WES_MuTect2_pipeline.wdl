@@ -9,6 +9,7 @@ workflow WES_MuTect2_pipeline {
         File normal_bam
         File normal_bam_idx
         File pon_vcf
+        File pon_vcf_tbi
         File ref_fasta
         File ref_fasta_idx
         File ref_fasta_dict
@@ -27,6 +28,7 @@ workflow WES_MuTect2_pipeline {
             normal_bam = normal_bam,
             normal_bam_idx = normal_bam_idx,
             pon_vcf = pon_vcf,
+            pon_vcf_tbi = pon_vcf_tbi,
             ref_fasta = ref_fasta,
             ref_fasta_idx = ref_fasta_idx,
             ref_fasta_dict = ref_fasta_dict,
@@ -52,6 +54,7 @@ task MuTect2 {
         File normal_bam
         File normal_bam_idx
         File pon_vcf
+        File pon_vcf_tbi
         File ref_fasta
         File ref_fasta_idx
         File ref_fasta_dict
