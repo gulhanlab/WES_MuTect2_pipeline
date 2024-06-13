@@ -83,6 +83,8 @@ task MuTect2 {
             --intervals ~{intervals_bed} \
             --exclude-intervals ~{exclude_intervals_bed} \
             -O ~{tumor_sample_name}.vcf
+            --genotype-germline-sites true \
+            --genotype-pon-sites true
     }
 
      output {
