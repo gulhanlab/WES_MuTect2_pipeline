@@ -53,15 +53,20 @@ task MuTect2 {
         String normal_sample_name
         File normal_bam
         File normal_bam_idx
-        File pon_vcf
-        File pon_vcf_tbi
         File ref_fasta
         File ref_fasta_idx
         File ref_fasta_dict
-        File intervals_bed
-        File exclude_intervals_bed
+  
+        # genome aggregation database allows distinguish between germline and somatic variants
         File gnomad
         File gnomad_tbi
+        # exclude sequencing artifcacts and technical errors
+        File pon_vcf
+        File pon_vcf_tbi
+        # Specify genomic regions of interests, restricts to targeted exome regions
+        File intervals_bed
+        # Blacklist regions to exclude from analysis (centromeres, telomeres, segmental duplications, high gc)
+        File exclude_intervals_bed
 
         # Configurable
         Int memory
@@ -80,17 +85,19 @@ task MuTect2 {
             --normal-sample ~{normal_sample_name} \
             --germline-resource ~{gnomad} \
             --panel-of-normals ~{pon_vcf} \
+
             --intervals ~{intervals_bed} \
             --exclude-intervals ~{exclude_intervals_bed} \
-            -O ~{tumor_sample_name}.vcf
+            
+            -O ~{tumor_sample_name}.unfiltered.vcf
             --genotype-germline-sites true \
             --genotype-pon-sites true
     }
 
      output {
-        File output_vcf = "~{tumor_sample_name}.vcf"
-        File output_vcf_idx = "~{tumor_sample_name}.vcf.idx"
-        File output_vcf_stats = "~{tumor_sample_name}.vcf.stats"
+        File output_vcf = "~{tumor_sample_name}.unfiltered.vcf"
+        File output_vcf_idx = "~{tumor_sample_name}.unfiltered.vcf.idx"
+        File output_vcf_stats = "~{tumor_sample_name}.unfiltered.vcf.stats"
     }
 
     runtime {
