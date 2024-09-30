@@ -15,8 +15,8 @@ workflow WES_MuTect2_pipeline {
         File ref_fasta_dict
         File intervals_bed
         File exclude_intervals_bed
-        File gnomad
-        File gnomad_tbi
+        File gnomad_vcf
+        File gnomad_vcf_tbi
     }
 
     call MuTect2 {
@@ -34,8 +34,8 @@ workflow WES_MuTect2_pipeline {
             ref_fasta_dict = ref_fasta_dict,
             intervals_bed = intervals_bed,
             exclude_intervals_bed = exclude_intervals_bed,
-            gnomad = gnomad,
-            gnomad_tbi = gnomad_tbi
+            gnomad_vcf = gnomad_vcf,
+            gnomad_vcf_tbi = gnomad_vcf_tbi
     }
 
     output {
@@ -45,6 +45,7 @@ workflow WES_MuTect2_pipeline {
     }
 }
 
+# TODO: separate from tumor-only and matched-normal modes
 task MuTect2 {
     input {
         String tumor_sample_name
@@ -58,8 +59,8 @@ task MuTect2 {
         File ref_fasta_dict
   
         # genome aggregation database allows distinguish between germline and somatic variants
-        File gnomad
-        File gnomad_tbi
+        File gnomad_vcf
+        File gnomad_vcf_tbi
         # exclude sequencing artifcacts and technical errors
         File pon_vcf
         File pon_vcf_tbi
@@ -80,12 +81,14 @@ task MuTect2 {
     #--genotype-germline-sites false \
     #--genotype-pon-sites false \
     command {
+        set -e
+        export GATK_LOCAL_JAR="/root/gatk.jar"
         gatk --java-options "-Xmx~{java_memory}g" Mutect2 \
             -R ~{ref_fasta} \
             -I ~{tumor_bam} \
             -I ~{normal_bam} \
             --normal-sample ~{normal_sample_name} \
-            --germline-resource ~{gnomad} \
+            --germline-resource ~{gnomad_vcf} \
             --panel-of-normals ~{pon_vcf} \
             --intervals ~{intervals_bed} \
             --exclude-intervals ~{exclude_intervals_bed} \
@@ -121,39 +124,199 @@ task MuTect2 {
 
 
 ## OPTIONAL: for oxidative artifacts
-# task LearnReadOrientationModel{
-#     command {
-#         gatk LearnReadOrientationModel -I f1r2.tar.gz -O read-orientation-model.tar.gz
-#     }
-# }
+task LearnReadOrientationModel{
+    input {
+        String tumor_sample_name
+        File f1r2_tar_gz
 
-# task GetPileupSummaries{
-#     command {
-#         gatk GetPileupSummaries \
-#             -I tumor.bam \
-#             -V chr17_small_exac_common_3_grch38.vcf.gz \
-#             -L chr17_small_exac_common_3_grch38.vcf.gz \
-#             -O getpileupsummaries.table
-#     }
-# }
+        # Configurable
+        Int memory
+        Int disk_space
+        Int num_threads
+        Int num_preempt
+    }
 
-# task CalculateContamination{
-#     command {
-#         gatk CalculateContamination \
-#             -I getpileupsummaries.table \
-#             -tumor-segmentation segments.table \
-#             -O calculatecontamination.table
-#     }
+    Int java_memory = ceil(memory * 0.8)
 
-# }
+    command {
+        set -e
+        export GATK_LOCAL_JAR="/root/gatk.jar"
+        gatk --java-options "-Xmx~{java_memory}g" LearnReadOrientationModel \
+            -I ~{f1r2.tar.gz} \
+            -O ~{tumor_sample_name}_artifact_priors.tar.gz
+    }
 
-# task FilterMutectCalls{
-#     command {
-#         gatk FilterMutectCalls -V unfiltered.vcf \
-#             [--tumor-segmentation segments.table] \
-#             [--contamination-table contamination.table] \
-#             --ob-priors read-orientation-model.tar.gz \
-#             -O filtered.vcf
-#     }
+    output {
+        File output_artifact_priors_tar_gz = "~{tumor_sample_name}_artifact_priors.tar.gz"
+    }
 
-# }
+    runtime {
+        docker: "broadinstitute/gatk:4.6.0.0"
+        memory: "${memory} GB"
+        disks: "local-disk ${disk_space} HDD"
+        cpu: "${num_threads}"
+        preemptible: "${num_preempt}"
+    }
+}
+
+# Use on both normal and tumor samples
+# --read-filter FirstOfPairReadFilter?
+# --read-filter PairendReadFilter?
+task GetPileupSummaries{
+    input {
+        String sample_name
+        File bam
+        File bam_idx
+        # genome aggregation database allows distinguish between germline and somatic variants
+        File gnomad_vcf
+        File gnomad_vcf_tbi
+        # Specify genomic regions of interests, restricts to targeted exome regions
+        File intervals_bed
+        # Blacklist regions to exclude from analysis (centromeres, telomeres, segmental duplications, high gc)
+        File exclude_intervals_bed
+
+        # Configurable
+        Int memory
+        Int disk_space
+        Int num_threads
+        Int num_preempt
+    }
+
+    command {
+        set -e
+        export GATK_LOCAL_JAR="/root/gatk.jar"
+        gatk --java-options "-Xmx~{java_memory}g" GetPileupSummaries \
+            -I ~{bam} \
+            --variant ~{gnomad_vcf} \
+            --intervals ~{intervals_bed} \
+            --exclude-intervals ~{exclude_intervals_bed} \
+            -O ~{sample_name}_getpileupsummaries.table
+    }
+
+    output {
+        File output_pileup_summaries = "~{sample_name}.getpileupsummaries.table"
+    }
+    
+    runtime {
+        docker: "broadinstitute/gatk:4.6.0.0"
+        memory: "${memory} GB"
+        disks: "local-disk ${disk_space} HDD"
+        cpu: "${num_threads}"
+        preemptible: "${num_preempt}"
+    }
+}
+
+# TODO: separate tumor-only mode and matched-normal mode
+task CalculateContamination{
+    input {
+        String tumor_sample_name
+        File tumor_pileup_summaries
+        File normal_pileup_summaries
+
+        # Configurable
+        Int memory
+        Int disk_space
+        Int num_threads
+        Int num_preempt
+    }
+
+    Int java_memory = ceil(memory * 0.8)
+
+    command {
+        set -e
+        export GATK_LOCAL_JAR="/root/gatk.jar"
+        gatk --java-options "-Xmx~{java_memory}g" CalculateContamination \
+            -I ~{tumor_pileup_summaries} \
+            --matched-normal ~{normal_pileup_summaries} \
+            --tumor-segmentation ~{tumor_sample_name}_segments.table \
+            -O ~{tumor_sample_name}_calculatecontamination.table
+    }
+
+    output {
+        File output_tumor_segments_table = "~{tumor_sample_name}_segments.table"
+        File output_contamination_table = "~{tumor_sample_name}_calculatecontamination.table"
+    }
+    
+    runtime {
+        docker: "broadinstitute/gatk:4.6.0.0"
+        memory: "${memory} GB"
+        disks: "local-disk ${disk_space} HDD"
+        cpu: "${num_threads}"
+        preemptible: "${num_preempt}"
+    }
+}
+
+
+# --max-median-fragment-length-difference = 10000  # default: 10000
+# --min-median-base-quality = 20  # default: 20
+# --min-median-mapping-quality = 20  # default: -1
+# --min-median-read-position = 5  # default: 1
+task FilterMutectCalls{
+    input {
+        String tumor_sample_name
+        File tumor_bam
+        File tumor_bam_idx
+        String normal_sample_name
+        File normal_bam
+        File normal_bam_idx
+        File ref_fasta
+        File ref_fasta_idx
+        File ref_fasta_dict
+  
+        # genome aggregation database allows distinguish between germline and somatic variants
+        File gnomad_vcf
+        File gnomad_vcf_tbi
+        # exclude sequencing artifcacts and technical errors
+        File pon_vcf
+        File pon_vcf_tbi
+        # Specify genomic regions of interests, restricts to targeted exome regions
+        File intervals_bed
+        # Blacklist regions to exclude from analysis (centromeres, telomeres, segmental duplications, high gc)
+        File exclude_intervals_bed
+
+        File mutect2_unfiltered_vcf_stats # From MuTect2
+        File artifact_priors_tar_gz # From LearnReadOrientationModel
+        File contamination_table # From CalculateContamination
+        File tumor_segments_table # From CalculateContamination
+        
+        # Configurable
+        Int memory
+        Int disk_space
+        Int num_threads
+        Int num_preempt
+    }
+
+    Int java_memory = ceil(memory * 0.8)
+
+    command {
+        set -e
+        export GATK_LOCAL_JAR="/root/gatk.jar"
+        gatk --java-options "-Xmx~{java_memory}g" FilterMutectCalls \
+            --reference ~{ref_fasta} \
+            --variant ~{gnomad_vcf} \
+            -O ~{tumor_sample_name}.filtered.vcf \
+            --filtering-stats ~{tumor_sample_name}.filtered.vcf.stats \
+            --stats ~{mutect2_unfiltered_vcf_stats} \
+            --orientation-bias-artifact-priors ~{artifact_priors_tar_gz} \
+            --contamination-table ~{contamination_table} \
+            --tumor-segmentation ~{tumor_segments_table} \
+            --max-median-fragment-length-difference = 10000 \
+            --min-median-base-quality = 20 \
+            --min-median-mapping-quality = 20 \
+            --min-median-read-position = 5 
+    }
+
+    output {
+        File output_filtered_vcf = "~{tumor_sample_name}.filtered.vcf"
+        File output_filtered_vcf_idx = "~{tumor_sample_name}.filtered.vcf.idx"
+        File output_filtered_vcf_stats = "~{tumor_sample_name}.filtered.vcf.stats"
+    }
+
+    runtime {
+        docker: "broadinstitute/gatk:4.6.0.0"
+        memory: "${memory} GB"
+        disks: "local-disk ${disk_space} HDD"
+        cpu: "${num_threads}"
+        preemptible: "${num_preempt}"
+    }
+}
