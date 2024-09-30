@@ -76,7 +76,9 @@ task MuTect2 {
     }
 
     Int java_memory = ceil(memory * 0.8)
-
+    
+    #--genotype-germline-sites false \
+    #--genotype-pon-sites false \
     command {
         gatk --java-options "-Xmx~{java_memory}g" Mutect2 \
             -R ~{ref_fasta} \
@@ -85,26 +87,73 @@ task MuTect2 {
             --normal-sample ~{normal_sample_name} \
             --germline-resource ~{gnomad} \
             --panel-of-normals ~{pon_vcf} \
-
             --intervals ~{intervals_bed} \
             --exclude-intervals ~{exclude_intervals_bed} \
-            
-            -O ~{tumor_sample_name}.unfiltered.vcf
-            --genotype-germline-sites true \
-            --genotype-pon-sites true
+            --f1r2-tar-gz ~{tumor_sample_name}.f1r2.tar.gz \
+            --bamout ~{tumor_sample_name}.bamout.bam \
+            -O ~{tumor_sample_name}.unfiltered.vcf \
+            --smith-waterman FASTEST_AVAILABLE \
+            --pair-hmm-implementation FASTEST_AVAILABLE \
+            --native-pair-hmm-threads ~{num_threads} \
+            --dont-use-soft-clipped-bases false \
+            --linked-de-bruijn-graph true \
+            --recover-all-dangling-branches true \
+            --pileup-detection true \
+            --native-pair-hmm-use-double-precision false
     }
 
      output {
         File output_vcf = "~{tumor_sample_name}.unfiltered.vcf"
         File output_vcf_idx = "~{tumor_sample_name}.unfiltered.vcf.idx"
         File output_vcf_stats = "~{tumor_sample_name}.unfiltered.vcf.stats"
+        File output_f1r2_tar_gz = "~{tumor_sample_name}.f1r2.tar.gz"
+        File output_bamout = "~{tumor_sample_name}.bamout.bam"
     }
 
     runtime {
-        docker: "broadinstitute/gatk:4.5.0.0"
+        docker: "broadinstitute/gatk:4.6.0.0"
         memory: "${memory} GB"
         disks: "local-disk ${disk_space} HDD"
         cpu: "${num_threads}"
         preemptible: "${num_preempt}"
     }
 }
+
+
+## OPTIONAL: for oxidative artifacts
+# task LearnReadOrientationModel{
+#     command {
+#         gatk LearnReadOrientationModel -I f1r2.tar.gz -O read-orientation-model.tar.gz
+#     }
+# }
+
+# task GetPileupSummaries{
+#     command {
+#         gatk GetPileupSummaries \
+#             -I tumor.bam \
+#             -V chr17_small_exac_common_3_grch38.vcf.gz \
+#             -L chr17_small_exac_common_3_grch38.vcf.gz \
+#             -O getpileupsummaries.table
+#     }
+# }
+
+# task CalculateContamination{
+#     command {
+#         gatk CalculateContamination \
+#             -I getpileupsummaries.table \
+#             -tumor-segmentation segments.table \
+#             -O calculatecontamination.table
+#     }
+
+# }
+
+# task FilterMutectCalls{
+#     command {
+#         gatk FilterMutectCalls -V unfiltered.vcf \
+#             [--tumor-segmentation segments.table] \
+#             [--contamination-table contamination.table] \
+#             --ob-priors read-orientation-model.tar.gz \
+#             -O filtered.vcf
+#     }
+
+# }
