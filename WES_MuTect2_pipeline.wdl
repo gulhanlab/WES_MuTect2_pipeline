@@ -217,7 +217,7 @@ task LearnReadOrientationModel{
         set -e
         export GATK_LOCAL_JAR="/root/gatk.jar"
         gatk --java-options "-Xmx~{java_memory}g" LearnReadOrientationModel \
-            -I ~{f1r2.tar.gz} \
+            -I ~{f1r2_tar_gz} \
             -O ~{tumor_sample_name}_artifact_priors.tar.gz
     }
 
