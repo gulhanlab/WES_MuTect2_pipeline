@@ -271,7 +271,7 @@ task GetPileupSummaries{
     }
 
     output {
-        File output_pileup_summaries = "~{sample_name}.getpileupsummaries.table"
+        File output_pileup_summaries = "~{sample_name}_getpileupsummaries.table"
     }
     
     runtime {
