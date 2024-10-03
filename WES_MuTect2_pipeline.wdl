@@ -267,11 +267,11 @@ task GetPileupSummaries{
             --variant ~{gnomad_vcf} \
             --intervals ~{intervals_bed} \
             --exclude-intervals ~{exclude_intervals_bed} \
-            -O ~{sample_name}_getpileupsummaries.table
+            -O ~{sample_name}.getpileupsummaries.table
     }
 
     output {
-        File output_pileup_summaries = "~{sample_name}_getpileupsummaries.table"
+        File output_pileup_summaries = "~{sample_name}.getpileupsummaries.table"
     }
     
     runtime {
