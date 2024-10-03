@@ -19,6 +19,7 @@ workflow WES_MuTect2_pipeline {
         File gnomad_vcf_tbi
     }
 
+    # 1. MuTect2
     call MuTect2 {
         input:
             tumor_sample_name = tumor_sample_name,
@@ -27,23 +28,98 @@ workflow WES_MuTect2_pipeline {
             normal_sample_name = normal_sample_name,
             normal_bam = normal_bam,
             normal_bam_idx = normal_bam_idx,
-            pon_vcf = pon_vcf,
-            pon_vcf_tbi = pon_vcf_tbi,
             ref_fasta = ref_fasta,
             ref_fasta_idx = ref_fasta_idx,
             ref_fasta_dict = ref_fasta_dict,
+            gnomad_vcf = gnomad_vcf,
+            gnomad_vcf_tbi = gnomad_vcf_tbi,
+            pon_vcf = pon_vcf,
+            pon_vcf_tbi = pon_vcf_tbi,
+            intervals_bed = intervals_bed,
+            exclude_intervals_bed = exclude_intervals_bed  
+    }
+
+    # 2. LearnReadOrientationModel (optional)
+    call LearnReadOrientationModel {
+        input:
+            tumor_sample_name = tumor_sample_name,
+            f1r2_tar_gz = MuTect2.output_f1r2_tar_gz
+    }
+
+    # 3. GetPileupSummaries (tumor)
+    call GetPileupSummaries as tumor_GetPileupSummaries {
+        input:
+            sample_name = tumor_sample_name,
+            bam = tumor_bam,
+            bam_idx = tumor_bam_idx,
+            gnomad_vcf = gnomad_vcf,
+            gnomad_vcf_tbi = gnomad_vcf_tbi,
+            intervals_bed = intervals_bed,
+            exclude_intervals_bed = exclude_intervals_bed
+    }
+
+    # 4. GetPileupSummaries (normal)
+    call GetPileupSummaries as normal_GetPileupSummaries {
+        input:
+            sample_name = normal_sample_name,
+            bam = normal_bam,
+            bam_idx = normal_bam_idx,
+            gnomad_vcf = gnomad_vcf,
+            gnomad_vcf_tbi = gnomad_vcf_tbi,
+            intervals_bed = intervals_bed,
+            exclude_intervals_bed = exclude_intervals_bed
+    }
+
+    # 5. CalculateContamination on tumor
+    call CalculateContamination {
+        input:
+            tumor_sample_name = tumor_sample_name,
+            tumor_pileup_summaries = tumor_GetPileupSummaries.output_pileup_summaries,
+            normal_pileup_summaries = normal_GetPileupSummaries.output_pileup_summaries
+    }
+
+    # 6. FilterMutectCalls
+    call FilterMutectCalls {
+        input:
+            tumor_sample_name = tumor_sample_name,
+            tumor_bam = tumor_bam,
+            tumor_bam_idx = tumor_bam_idx,
+            normal_sample_name = normal_sample_name,
+            normal_bam = normal_bam,
+            normal_bam_idx = normal_bam_idx,
+            ref_fasta = ref_fasta,
+            ref_fasta_idx = ref_fasta_idx,
+            ref_fasta_dict = ref_fasta_dict,
+            gnomad_vcf = gnomad_vcf,
+            gnomad_vcf_tbi = gnomad_vcf_tbi,
+            pon_vcf = pon_vcf,
+            pon_vcf_tbi = pon_vcf_tbi,
             intervals_bed = intervals_bed,
             exclude_intervals_bed = exclude_intervals_bed,
-            gnomad_vcf = gnomad_vcf,
-            gnomad_vcf_tbi = gnomad_vcf_tbi
+            mutect2_unfiltered_vcf_stats = MuTect2.output_vcf_stats,
+            artifact_priors_tar_gz = LearnReadOrientationModel.output_artifact_priors_tar_gz,
+            contamination_table = CalculateContamination.output_contamination_table,
+            tumor_segments_table = CalculateContamination.output_segments_table
     }
 
     output {
         File mutect2_vcf = MuTect2.output_vcf
         File mutect2_vcf_idx = MuTect2.output_vcf_idx
         File mutect2_vcf_stats = MuTect2.output_vcf_stats
+        File mutect2_f1r2_tar_gz = MuTect2.output_f1r2_tar_gz
+        File mutect2_bamout = MuTect2.output_bamout
+        File artifact_priors_tar_gz = LearnReadOrientationModel.output_artifact_priors_tar_gz
+        File tumor_pileup_summaries = tumor_GetPileupSummaries.output_pileup_summaries
+        File normal_pileup_summaries = normal_GetPileupSummaries.output_pileup_summaries
+        File tumor_segments_table = CalculateContamination.output_segments_table
+        File tumor_contamination_table = CalculateContamination.output_contamination_table
+        File mutect2_filtered_vcf = FilterMutectCalls.output_filtered_vcf
+        File mutect2_filtered_vcf_idx = FilterMutectCalls.output_filtered_vcf_idx
+        File mutect2_filtered_vcf_stats = FilterMutectCalls.output_filtered_vcf_stats
     }
 }
+
+## TASK DEFINITIONS ###########################################################################################
 
 # TODO: separate from tumor-only and matched-normal modes
 task MuTect2 {
@@ -57,7 +133,6 @@ task MuTect2 {
         File ref_fasta
         File ref_fasta_idx
         File ref_fasta_dict
-  
         # genome aggregation database allows distinguish between germline and somatic variants
         File gnomad_vcf
         File gnomad_vcf_tbi
@@ -115,10 +190,10 @@ task MuTect2 {
 
     runtime {
         docker: "broadinstitute/gatk:4.6.0.0"
-        memory: "${memory} GB"
-        disks: "local-disk ${disk_space} HDD"
-        cpu: "${num_threads}"
-        preemptible: "${num_preempt}"
+        memory: "~{memory} GB"
+        disks: "local-disk ~{disk_space} HDD"
+        cpu: "~{num_threads}"
+        preemptible: "~{num_preempt}"
     }
 }
 
@@ -152,10 +227,10 @@ task LearnReadOrientationModel{
 
     runtime {
         docker: "broadinstitute/gatk:4.6.0.0"
-        memory: "${memory} GB"
-        disks: "local-disk ${disk_space} HDD"
-        cpu: "${num_threads}"
-        preemptible: "${num_preempt}"
+        memory: "~{memory} GB"
+        disks: "local-disk ~{disk_space} HDD"
+        cpu: "~{num_threads}"
+        preemptible: "~{num_preempt}"
     }
 }
 
@@ -199,10 +274,10 @@ task GetPileupSummaries{
     
     runtime {
         docker: "broadinstitute/gatk:4.6.0.0"
-        memory: "${memory} GB"
-        disks: "local-disk ${disk_space} HDD"
-        cpu: "${num_threads}"
-        preemptible: "${num_preempt}"
+        memory: "~{memory} GB"
+        disks: "local-disk ~{disk_space} HDD"
+        cpu: "~{num_threads}"
+        preemptible: "~{num_preempt}"
     }
 }
 
@@ -233,16 +308,16 @@ task CalculateContamination{
     }
 
     output {
-        File output_tumor_segments_table = "~{tumor_sample_name}_segments.table"
+        File output_segments_table = "~{tumor_sample_name}_segments.table"
         File output_contamination_table = "~{tumor_sample_name}_calculatecontamination.table"
     }
     
     runtime {
         docker: "broadinstitute/gatk:4.6.0.0"
-        memory: "${memory} GB"
-        disks: "local-disk ${disk_space} HDD"
-        cpu: "${num_threads}"
-        preemptible: "${num_preempt}"
+        memory: "~{memory} GB"
+        disks: "local-disk ~{disk_space} HDD"
+        cpu: "~{num_threads}"
+        preemptible: "~{num_preempt}"
     }
 }
 
@@ -314,9 +389,9 @@ task FilterMutectCalls{
 
     runtime {
         docker: "broadinstitute/gatk:4.6.0.0"
-        memory: "${memory} GB"
-        disks: "local-disk ${disk_space} HDD"
-        cpu: "${num_threads}"
-        preemptible: "${num_preempt}"
+        memory: "~{memory} GB"
+        disks: "local-disk ~{disk_space} HDD"
+        cpu: "~{num_threads}"
+        preemptible: "~{num_preempt}"
     }
 }
