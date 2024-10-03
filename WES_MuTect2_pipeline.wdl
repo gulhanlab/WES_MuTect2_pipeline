@@ -257,6 +257,8 @@ task GetPileupSummaries{
         Int num_preempt
     }
 
+    Int java_memory = ceil(memory * 0.8)
+
     command {
         set -e
         export GATK_LOCAL_JAR="/root/gatk.jar"
